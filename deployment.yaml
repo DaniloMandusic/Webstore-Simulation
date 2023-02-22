@@ -1,0 +1,150 @@
+version: '3'
+
+services:
+  adminer:
+    image: adminer
+    ports:
+      - 8080:8080
+    networks:
+      - authenticationNetwork
+
+  #authentication
+  authenticationDB:
+    image: mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 15s
+      retries: 30
+    #volumes:
+      #- authenticationVolume:/var/lib/mysql
+    networks:
+      - authenticationNetwork
+  authenticationDBMigration:
+    image: authenticationdbmigration
+    environment:
+      - DATABASE_URL=authenticationDB
+    depends_on:
+      authenticationDB:
+        condition: service_healthy
+    networks:
+      - authenticationNetwork
+  authentication:
+    image: authentication
+    environment:
+      - DATABASE_URL=authenticationDB
+    depends_on:
+      - authenticationDBMigration
+    ports:
+      - 5002:5002
+    networks:
+      - authenticationNetwork
+
+  #warehouse
+  redis:
+    image: redis
+    ports:
+      - 6379:6379
+    networks:
+      - redisDaemonNetwork
+      - redisStorageWorkerNetwork
+  warehouseDB:
+    image: mysql
+    environment:
+      - MYSQL_ROOT_PASSWORD=root
+    ports:
+      - 3307:3306
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      timeout: 15s
+      retries: 30
+    networks:
+      - buyerNetwork
+      - daemonNetwork
+      - adminNetwork
+      - storageWorkerNetwork
+      - authenticationNetwork
+    #volumes:
+      #- warehouseVolume:/var/lib/mysql
+  warehouseDBMigration:
+    image: warehousedbmigration
+    environment:
+      - DATABASE_URL=warehouseDB
+      - REDIS_PORT=redis
+    depends_on:
+      warehouseDB:
+        condition: service_healthy
+    networks:
+      - adminNetwork
+      - daemonNetwork
+      - buyerNetwork
+  daemon:
+    image: daemon
+    environment:
+      - DATABASE_URL=warehouseDB
+      - REDIS_PORT=redis
+      #- REDIS_HOST=redis
+    depends_on:
+      - warehouseDBMigration
+      - redis
+    networks:
+      - daemonNetwork
+      - redisDaemonNetwork
+
+  #buyer
+  buyer:
+    image: buyer
+    environment:
+      - DATABASE_URL=warehouseDB
+      - REDIS_PORT=redis
+    ports:
+      - 5003:5003
+    depends_on:
+      - warehouseDBMigration
+      - authenticationDBMigration
+    networks:
+      - buyerNetwork
+
+  #storage worker
+  storageWorker:
+    image: storageworker
+    environment:
+      - DATABASE_URL=shopDB
+      - REDIS_PORT=redis
+    depends_on:
+      - warehouseDBMigration
+      #- buyer
+      - authenticationDBMigration
+    ports:
+      - 5004:5004
+    networks:
+      - storageWorkerNetwork
+      - redisStorageWorkerNetwork
+
+  #admin
+  admin:
+    image: admin
+    environment:
+      - DATABASE_URL=warehouseDB
+      - REDIS_PORT=redis
+    ports:
+      - 5005:5005
+    depends_on:
+      - warehouseDBMigration
+    networks:
+      - adminNetwork
+
+
+volumes:
+  authenticationVolume:
+  warehouseVolume:
+
+networks:
+  adminNetwork:
+  buyerNetwork:
+  storageWorkerNetwork:
+  daemonNetwork:
+  authenticationNetwork:
+  redisDaemonNetwork:
+  redisStorageWorkerNetwork:
